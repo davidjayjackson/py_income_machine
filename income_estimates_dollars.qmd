@@ -1,0 +1,166 @@
+---
+title: "Income Estimates (Dollar Amounts)"
+format: html
+editor: visual
+toc: true
+jupyter: python3
+---
+
+```{python}
+#| echo: false
+#| message: false
+import matplotlib.pyplot as plt
+import pandas as pd
+import yfinance as yf
+
+# -----------------------------
+# 1) Enter the stocks and the actual dollar amount
+#    you are investing in each one
+# -----------------------------
+alloc_input = pd.DataFrame({
+    "symbol":  ["JEPI", "JEPQ", "QYLD", "SCHD"],
+    "dollars": [50981, 25000, 10000, 47000],
+})
+
+symbols = alloc_input["symbol"].tolist()
+
+if alloc_input["dollars"].isna().any() or (alloc_input["dollars"] < 0).any():
+    raise ValueError("Each dollar amount must be a non-negative number.")
+
+# total invested is the sum of what you entered
+total_investment = alloc_input["dollars"].sum()
+
+# -----------------------------
+# 2) Derive the percent each stock represents
+# -----------------------------
+alloc_tbl = alloc_input.assign(
+    weight=lambda d: d["dollars"] / total_investment,
+    percent=lambda d: d["dollars"] / total_investment * 100,
+)
+
+# -----------------------------
+# 3) Get latest stock prices (adjusted close, like the R version)
+# -----------------------------
+def latest_price(sym):
+    h = yf.Ticker(sym).history(period="10d", auto_adjust=False)
+    return h["Adj Close"].dropna().iloc[-1]
+
+prices_tbl = pd.DataFrame({
+    "symbol": symbols,
+    "price": [latest_price(s) for s in symbols],
+})
+```
+
+```{python}
+# -----------------------------
+# 4) Get dividend history
+#    Use the last 12 months to estimate annual dividends/share
+# -----------------------------
+frames = []
+for sym in symbols:
+    s = yf.Ticker(sym).dividends
+    if s.empty:
+        continue
+    df = s.reset_index()
+    df.columns = ["date", "value"]
+    df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+    df.insert(0, "symbol", sym)
+    frames.append(df)
+
+div_tbl = pd.concat(frames, ignore_index=True)
+last_date = div_tbl["date"].max()
+
+annual_div_tbl = (
+    div_tbl.dropna(subset=["value"])
+    .loc[lambda d: d["date"] > last_date - pd.DateOffset(months=12)]
+    .groupby("symbol", as_index=False)["value"]
+    .sum()
+    .rename(columns={"value": "annual_dividend_per_share"})
+)
+```
+
+```{python}
+# -----------------------------
+# 5) Combine allocation, price, and dividend data
+# -----------------------------
+income_tbl = (
+    alloc_tbl
+    .merge(prices_tbl, on="symbol", how="left")
+    .merge(annual_div_tbl, on="symbol", how="left")
+    .assign(dollars_invested=lambda d: d["dollars"])
+    .assign(
+        shares_estimated=lambda d: d["dollars_invested"] / d["price"],
+        dividend_yield=lambda d: d["annual_dividend_per_share"] / d["price"],
+    )
+    .assign(annual_income=lambda d: d["shares_estimated"] * d["annual_dividend_per_share"])
+    .assign(monthly_income=lambda d: d["annual_income"] / 12)
+    .sort_values("monthly_income", ascending=False)
+    .reset_index(drop=True)
+)
+```
+
+```{python}
+# -----------------------------
+# 6) View stock-by-stock estimates
+# -----------------------------
+detail_tbl = pd.DataFrame({
+    "symbol": income_tbl["symbol"],
+    "percent": income_tbl["percent"].round(2),
+    "price": income_tbl["price"].round(2),
+    "annual_dividend_per_share": income_tbl["annual_dividend_per_share"].round(2),
+    "dividend_yield": income_tbl["dividend_yield"].map("{:.2%}".format),
+    "dollars_invested": income_tbl["dollars_invested"].round(2),
+    "shares_estimated": income_tbl["shares_estimated"].round(2),
+    "annual_income": income_tbl["annual_income"].round(2),
+    "monthly_income": income_tbl["monthly_income"].round(2),
+})
+detail_tbl
+```
+
+```{python}
+# -----------------------------
+# 7) Total invested and total estimated income
+# -----------------------------
+pd.DataFrame({
+    "total_invested": [income_tbl["dollars_invested"].sum()],
+    "total_annual_income": [income_tbl["annual_income"].sum()],
+    "total_monthly_income": [income_tbl["monthly_income"].sum()],
+}).round(2)
+```
+
+```{python}
+summary_tbl = pd.DataFrame({
+    "symbol": income_tbl["symbol"],
+    "percent": income_tbl["percent"].round(2),
+    "invested": income_tbl["dollars_invested"].round(0),
+    "yield": income_tbl["dividend_yield"].map("{:.2%}".format),
+    "annual_income": income_tbl["annual_income"].round(2),
+    "monthly_income": income_tbl["monthly_income"].round(2),
+})
+
+summary_tbl
+```
+
+```{python}
+def bar(col):
+    d = summary_tbl.sort_values("symbol")  # alphabetical, like ggplot
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(d["symbol"], d[col])
+    ax.set_xlabel("symbol")
+    ax.set_ylabel(col)
+    plt.show()
+
+bar("invested")
+```
+
+```{python}
+bar("percent")
+```
+
+```{python}
+bar("annual_income")
+```
+
+```{python}
+bar("monthly_income")
+```
