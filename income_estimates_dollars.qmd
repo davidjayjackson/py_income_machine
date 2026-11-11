@@ -18,8 +18,8 @@ import yfinance as yf
 #    you are investing in each one
 # -----------------------------
 alloc_input = pd.DataFrame({
-    "symbol":  ["JEPI", "JEPQ", "QYLD", "SCHD"],
-    "dollars": [50981, 25000, 10000, 47000],
+    "symbol":  ["JEPI", "JEPQ", "QYLD", "SCHD","VUSXX"],
+    "dollars": [51968.14, 24378.88, 10086.78,49904.26,11,000.00],
 })
 
 symbols = alloc_input["symbol"].tolist()
